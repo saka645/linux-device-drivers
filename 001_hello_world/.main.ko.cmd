@@ -1,0 +1,1 @@
+cmd_/home/sanjay/pocketbeagle/drivers/001_hello_world/main.ko := arm-linux-gnueabihf-ld -r  -EL -z noexecstack   --build-id=sha1  -T scripts/module.lds -o /home/sanjay/pocketbeagle/drivers/001_hello_world/main.ko /home/sanjay/pocketbeagle/drivers/001_hello_world/main.o /home/sanjay/pocketbeagle/drivers/001_hello_world/main.mod.o;  true

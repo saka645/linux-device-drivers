@@ -1,0 +1,1 @@
+cmd_/home/sanjay/pocketbeagle/drivers/001_hello_world/Module.symvers := sed 's/ko$$/o/' /home/sanjay/pocketbeagle/drivers/001_hello_world/modules.order | scripts/mod/modpost -m    -o /home/sanjay/pocketbeagle/drivers/001_hello_world/Module.symvers -e -i Module.symvers   -T -

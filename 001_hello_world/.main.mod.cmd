@@ -1,0 +1,1 @@
+cmd_/home/sanjay/pocketbeagle/drivers/001_hello_world/main.mod := { echo  /home/sanjay/pocketbeagle/drivers/001_hello_world/main.o;  echo; } > /home/sanjay/pocketbeagle/drivers/001_hello_world/main.mod
