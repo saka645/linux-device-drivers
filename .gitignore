@@ -1,0 +1,17 @@
+# Ignore object files and compiled modules
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+
+# Ignore build logs and tool output
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+*.build.cmd
+
+# Ignore hidden Git/Editor backup files
+*~
+.DS_Store
