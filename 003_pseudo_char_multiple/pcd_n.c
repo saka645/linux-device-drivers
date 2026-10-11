@@ -46,33 +46,46 @@ struct pcdrv_private_data pcdrv_data =
 	.device_pcd = NULL,
 	.pcdev_data =
 	{
-		[0] = {.buffer = device_buffer1, .size = MEM_SIZE_MAX_PCD1, .serial_number = "PCDEV1111", .perm = RDONLY},
-		[1] = {.buffer = device_buffer2, .size = MEM_SIZE_MAX_PCD2, .serial_number = "PCDEV2222", .perm = WRONLY},
-		[2] = {.buffer = device_buffer3, .size = MEM_SIZE_MAX_PCD3, .serial_number = "PCDEV3333", .perm = RDWR},
-		[3] = {.buffer = device_buffer4, .size = MEM_SIZE_MAX_PCD4, .serial_number = "PCDEV4444", .perm = RDWR}
+		[0] = {.buffer = device_buffer1, .size = MEM_SIZE_MAX_PCD1, .serial_number = "PCDEV1111", .perm = O_RDONLY},
+		[1] = {.buffer = device_buffer2, .size = MEM_SIZE_MAX_PCD2, .serial_number = "PCDEV2222", .perm = O_WRONLY},
+		[2] = {.buffer = device_buffer3, .size = MEM_SIZE_MAX_PCD3, .serial_number = "PCDEV3333", .perm = O_RDWR},
+		[3] = {.buffer = device_buffer4, .size = MEM_SIZE_MAX_PCD4, .serial_number = "PCDEV4444", .perm = O_RDWR}
 	}
 };
 
+int check_permission(int dev_pern, int acc_mode)
+{
+	if(dev_pern == O_RDWR)
+		return 0;
+	if(dev_pern == O_RDONLY && (acc_mode & FMODE_READ) && !(acc_mode & FMODE_WRITE))
+		return 0;
+	if(dev_pern == O_WRONLY && (acc_mode & FMODE_WRITE) && !(acc_mode & FMODE_READ))
+		return 0;
+	return -EPERM;
+}
+
 loff_t pcd_lseek(struct file *filp, loff_t offset, int whence){
 	loff_t temp;
+	struct pcdev_private_data *pcdev_data = (struct pcdev_private_data *)filp->private_data;
+	int max_size = pcdev_data->size;
 	pr_info("lseek req\n");
 	pr_info("current file pos=%lld\n", filp->f_pos);
 	switch(whence)
 	{
 		case SEEK_SET:
-		    if(offset > DEV_MEM_SIZE || offset < 0)
+		    if(offset > max_size || offset < 0)
 				return -EINVAL;
 			filp->f_pos = offset;
 			break;	
 		case SEEK_CUR:
 			temp = filp->f_pos + offset;
-			if(temp > DEV_MEM_SIZE || temp < 0)
+			if(temp > max_size || temp < 0)
 				return -EINVAL;
 			filp->f_pos += temp;
 			break;
 		case SEEK_END:
 			temp = filp->f_pos + offset;
-			if(temp > DEV_MEM_SIZE || temp < 0)
+			if(temp > max_size || temp < 0)
 				return -EINVAL;	
 			filp->f_pos = temp;
 			break;
@@ -86,12 +99,15 @@ ssize_t pcd_read(struct file *filp, char __user *buff, size_t count, loff_t * f_
 {
 	pr_info("read req %zu bytes\n",count);
 	pr_info("current file pos=%lld\n",*f_pos);
-	if((*f_pos + count) > DEV_MEM_SIZE)
+	struct pcdev_private_data *pcdev_data = (struct pcdev_private_data *)filp->private_data;
+	int max_size = pcdev_data->size;
+
+	if((*f_pos + count) > max_size)
 	{
-		count = DEV_MEM_SIZE - *f_pos;
+		count = max_size - *f_pos;
 	}
 	/*copy to user*/
-	if(copy_to_user(buff,&device_buffer[*f_pos], count))
+	if(copy_to_user(buff,pcdev_data->buffer+(*f_pos), count))
 	{
 		return -EFAULT;
 	}
@@ -104,14 +120,17 @@ ssize_t pcd_read(struct file *filp, char __user *buff, size_t count, loff_t * f_
 ssize_t pcd_write(struct file *filp, const char __user *buff, size_t count, loff_t *f_pos){
 	pr_info("write req %zu bytes\n",count);
 	pr_info("current file pos=%lld\n",*f_pos);
-	if((*f_pos + count) > DEV_MEM_SIZE)
+	struct pcdev_private_data *pcdev_data = (struct pcdev_private_data *)filp->private_data;
+	int max_size = pcdev_data->size;
+
+	if((*f_pos + count) > max_size)
 	{
-		count = DEV_MEM_SIZE - *f_pos;
+		count = max_size - *f_pos;
 	}
 	if(!count) 
 		return -ENOMEM;
 	/*copy from user*/
-	if(copy_from_user(&device_buffer[*f_pos], buff, count))
+	if(copy_from_user(pcdev_data->buffer+(*f_pos), buff, count))
 	{
 		return -EFAULT;
 	}
@@ -122,6 +141,20 @@ ssize_t pcd_write(struct file *filp, const char __user *buff, size_t count, loff
 	return count;
 }
 int pcd_open(struct inode *inode, struct file *filp){
+	int ret;
+	int minor_n;
+	struct pcdev_private_data *pcdev_data;
+	/*find out which device file is opened*/
+	minor_n = MINOR(inode->i_rdev);
+	pr_info("minor access=%d\n",minor_n);
+	/*get device's private data structure*/
+	pcdev_data = container_of(inode->i_cdev, struct pcdev_private_data, cdev);
+	/*save device's private data structure in filp->private_data*/
+	filp->private_data = pcdev_data;
+	/*check permission*/
+	ret = check_permission((pcdev_data->perm), filp->f_mode);
+	if(ret)
+		return -EPERM;		
 		pr_info("open succesful\n");
 		return 0;
 }
@@ -146,6 +179,7 @@ struct file_operations pcd_fops =
 static int __init pcd_driver_init(void)
 {	
 	int ret;
+	int i=0;
 	/*ALLOCATE*/
 	ret = alloc_chrdev_region(&pcdrv_data.device_number,0,NO_OF_DEVICES,"pcd_devices");
 	if(ret < 0)
@@ -153,50 +187,63 @@ static int __init pcd_driver_init(void)
 		pr_err("Alloc chrdev failed\n");
 		goto out;
 	}
-	for(int i=0; i<NO_OF_DEVICES; i++)
+	for(i=0; i<NO_OF_DEVICES; i++)
 	{
 		pr_info("Device-%d, major=%d, minor=%d\n",i,MAJOR(pcdrv_data.device_number+i),MINOR(pcdrv_data.device_number+i));
 	}
-	for(int i=0; i<NO_OF_DEVICES; i++)
+	/*create device class*/
+	pcdrv_data.class_pcd = class_create(THIS_MODULE, "pcd_class");
+	if(IS_ERR(pcdrv_data.class_pcd))
 	{
-		cdev_init(&pcdrv_data.cdev[i], &pcd_fops);
+		pr_err("class creation failed\n");
+		ret = PTR_ERR(pcdrv_data.class_pcd);
+		goto unreg_chrdev;
+	}
+
+	for(i=0; i<NO_OF_DEVICES; i++)
+	{
+		cdev_init(&pcdrv_data.pcdev_data[i].cdev, &pcd_fops);
 
 		pcdrv_data.pcdev_data[i].cdev.owner = THIS_MODULE;;
-		ret = cdev_add(&pcdrv_data.cdev[i], pcdrv_data.device_number + i, 1);
+		ret = cdev_add(&pcdrv_data.pcdev_data[i].cdev, pcdrv_data.device_number + i, 1);
 		if(ret < 0)
 		{
 			pr_err("cdev_add failed for device %d\n", i);
-			goto unregister_chrdev;
-		}
-
-
-		/*create device class*/
-		class_pcd = class_create(THIS_MODULE, "pcd_class");
-		if(IS_ERR(class_pcd))
-		{
-			pr_err("class creation failed\n");
-			ret = PTR_ERR(class_pcd);
 			goto cdev_del;
 		}
+	}
 
-		device_pcd = device_create(class_pcd, NULL, pcdrv_data.device_number+i, NULL, "pcd-%d",i);
-		if(IS_ERR(device_pcd))
+
+
+	for(i=0; i<NO_OF_DEVICES; i++)
+	{
+		pcdrv_data.device_pcd = device_create(pcdrv_data.class_pcd, NULL, pcdrv_data.device_number + i, NULL, "pcd-%d",i);
+		if(IS_ERR(pcdrv_data.device_pcd))
 		{
 			pr_err("device creation failed\n");
-			ret = PTR_ERR(device_pcd);
+			ret = PTR_ERR(pcdrv_data.device_pcd);
 			goto class_del;
 		}
 	}
 	pr_info("Module init sucessfull\n");
 	return 0;
 
-class_del:
-	class_destroy(class_pcd);
 cdev_del:
-	/*delete cdev*/
-	cdev_del(&pcd_cdev);
-unregister_chrdev:
-	unregister_chrdev_region(device_number,1);
+class_del:
+	for(;i>=0; i--)
+	{
+		device_destroy(pcdrv_data.class_pcd, pcdrv_data.device_number + i);
+	}	
+		/*delete cdev*/
+	for(i=0; i<NO_OF_DEVICES; i++)
+	{
+		cdev_del(&pcdrv_data.pcdev_data[i].cdev);
+	}
+	class_destroy(pcdrv_data.class_pcd);
+
+unreg_chrdev:
+	unregister_chrdev_region(pcdrv_data.device_number,NO_OF_DEVICES);
+
 out:
 	return ret;
 }
@@ -204,10 +251,18 @@ out:
 
 static void __exit pcd_driver_cleanup(void)
 {
-	device_destroy(class_pcd, device_number);
-	class_destroy(class_pcd);
-	cdev_del(&pcd_cdev);
-	unregister_chrdev_region(device_number,1);
+	int i=0;
+	for(;i>=0; i--)
+	{
+		device_destroy(pcdrv_data.class_pcd, pcdrv_data.device_number + i);
+	}	
+		/*delete cdev*/
+	for(i=0; i<NO_OF_DEVICES; i++)
+	{
+		cdev_del(&pcdrv_data.pcdev_data[i].cdev);
+	}
+	class_destroy(pcdrv_data.class_pcd);
+	unregister_chrdev_region(pcdrv_data.device_number,NO_OF_DEVICES);
 	pr_info("Module unloaded\n");
 }
 
